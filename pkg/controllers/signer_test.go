@@ -295,3 +295,46 @@ func generateTestCert(t *testing.T, isCA bool, subject, issuer string, expiry ti
 
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }
+
+func TestSanitizeGCPLabelKey(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"valid-key", "valid-key"},
+		{"UPPERCASE", "uppercase"},
+		{"with_underscores", "with_underscores"},
+		{"invalid/chars@!", "invalid_chars__"},
+		{"123starts-with-number", "starts-with-number"},
+		{"-starts-with-hyphen", "starts-with-hyphen"},
+		{"_starts-with-underscore", "starts-with-underscore"},
+		{"a" + strings.Repeat("a", 100), "a" + strings.Repeat("a", 62)}, // truncates to 63
+	}
+
+	for _, test := range tests {
+		actual := sanitizeGCPLabelKey(test.input)
+		if actual != test.expected {
+			t.Errorf("sanitizeGCPLabelKey(%q) = %q, expected %q", test.input, actual, test.expected)
+		}
+	}
+}
+
+func TestSanitizeGCPLabelValue(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"valid-value", "valid-value"},
+		{"UPPERCASE", "uppercase"},
+		{"123starts-with-number", "123starts-with-number"}, // Values can start with numbers
+		{"invalid/chars@!", "invalid_chars__"},
+		{"a" + strings.Repeat("a", 100), "a" + strings.Repeat("a", 62)}, // truncates to 63
+	}
+
+	for _, test := range tests {
+		actual := sanitizeGCPLabelValue(test.input)
+		if actual != test.expected {
+			t.Errorf("sanitizeGCPLabelValue(%q) = %q, expected %q", test.input, actual, test.expected)
+		}
+	}
+}

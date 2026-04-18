@@ -54,6 +54,7 @@ rules:
   - cert-manager.io
   resources:
   - certificaterequests
+  - certificates
   verbs:
   - get
   - list

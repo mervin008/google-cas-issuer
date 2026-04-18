@@ -54,6 +54,15 @@ type GoogleCASIssuerSpec struct {
 	// "PoolCAs": ca.crt contains all root CA certificates of all ENABLED, DISABLED, or STAGED Certificate Authority Service CA Pool CAs that are not expired.
 	// +optional
 	CAFetchMode CAFetchMode `json:"caFetchMode,omitempty"`
+
+	// CertificateLabels are key-value pairs that will be applied as labels
+	// to every certificate issued by this issuer in Google Certificate Authority Service.
+	// These labels are visible in the GCP Console and can be used for filtering,
+	// cost attribution, and organizational visibility.
+	// Label keys and values must conform to GCP label constraints:
+	// keys and values must be 1-63 characters, lowercase letters, digits, underscores, and hyphens.
+	// +optional
+	CertificateLabels map[string]string `json:"certificateLabels,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=CA;PoolCAs

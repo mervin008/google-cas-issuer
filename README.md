@@ -16,7 +16,7 @@ Certificate Authority Service (CAS)](https://cloud.google.com/certificate-author
 ## Getting started
 
 ### Prerequisites
-
+  
 #### CAS-enabled GCP project
 
 Enable the Certificate Authority API (`privateca.googleapis.com`) in your GCP project by following the

@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"regexp"
 	"strings"
 	"time"
 
@@ -47,6 +48,28 @@ import (
 )
 
 var PickedupRequestConditionType = cmapi.CertificateRequestConditionType("pickedup")
+
+const (
+	// certificateLabelAnnotationPrefix is the annotation prefix used to extract
+	// user-defined labels from the parent Certificate's annotations.
+	// Annotations with this prefix will have the prefix stripped and the
+	// remainder used as the GCP CAS certificate label key.
+	certificateLabelAnnotationPrefix = "cas.issuer.jetstack.io/certificate-label-"
+
+	// certManagerCertificateNameKey is the annotation key used by cert-manager
+	// on CertificateRequests to reference the parent Certificate's name.
+	certManagerCertificateNameKey = "cert-manager.io/certificate-name"
+
+	// maxGCPLabels is the maximum number of labels allowed on a GCP resource.
+	maxGCPLabels = 64
+	// maxGCPLabelKeyLen is the maximum length of a GCP label key.
+	maxGCPLabelKeyLen = 63
+	// maxGCPLabelValueLen is the maximum length of a GCP label value.
+	maxGCPLabelValueLen = 63
+)
+
+// gcpLabelKeyRegexp matches valid GCP label key characters.
+var gcpLabelKeyRegexp = regexp.MustCompile(`[^a-z0-9_-]`)
 
 type GoogleCAS struct {
 	client client.Client
@@ -85,19 +108,19 @@ func (s *GoogleCAS) SetupWithManager(ctx context.Context, mgr ctrl.Manager, ctrl
 	}).SetupWithManager(ctx, mgr)
 }
 
-func (o *GoogleCAS) extractIssuerSpec(obj client.Object) (issuerSpec *issuersv1beta1.GoogleCASIssuerSpec, namespace string) {
+func (o *GoogleCAS) extractIssuerSpec(obj client.Object) (issuerSpec *issuersv1beta1.GoogleCASIssuerSpec, namespace string, issuerKind string) {
 	switch t := obj.(type) {
 	case *issuersv1beta1.GoogleCASIssuer:
-		return &t.Spec, t.Namespace
+		return &t.Spec, t.Namespace, "GoogleCASIssuer"
 	case *issuersv1beta1.GoogleCASClusterIssuer:
-		return &t.Spec, viper.GetString("cluster-resource-namespace")
+		return &t.Spec, viper.GetString("cluster-resource-namespace"), "GoogleCASClusterIssuer"
 	}
 
 	panic("Program Error: Unhandled issuer type")
 }
 
 func (o *GoogleCAS) Check(ctx context.Context, issuerObj issuerapi.Issuer) error {
-	issuerSpec, resourceNamespace := o.extractIssuerSpec(issuerObj)
+	issuerSpec, resourceNamespace, _ := o.extractIssuerSpec(issuerObj)
 
 	casClient, _, err := o.createCasClient(ctx, resourceNamespace, issuerSpec)
 	if err != nil {
@@ -110,7 +133,7 @@ func (o *GoogleCAS) Check(ctx context.Context, issuerObj issuerapi.Issuer) error
 
 // Sign implements signer.Sign for Venafi TPP and Venafi-as-a-Service.
 func (o *GoogleCAS) Sign(ctx context.Context, cr signer.CertificateRequestObject, issuerObj issuerapi.Issuer) (signer.PEMBundle, error) {
-	issuerSpec, resourceNamespace := o.extractIssuerSpec(issuerObj)
+	issuerSpec, resourceNamespace, issuerKind := o.extractIssuerSpec(issuerObj)
 
 	details, err := cr.GetCertificateDetails()
 	if err != nil {
@@ -122,6 +145,9 @@ func (o *GoogleCAS) Sign(ctx context.Context, cr signer.CertificateRequestObject
 		return signer.PEMBundle{}, signer.IssuerError{Err: err}
 	}
 	defer casClient.Close()
+
+	// Build labels from issuer spec, auto-injected metadata, and parent Certificate annotations
+	certLabels := buildCertificateLabels(ctx, o.client, cr, issuerObj.GetName(), issuerKind, issuerSpec)
 
 	createCertificateRequest := &casapi.CreateCertificateRequest{
 		Parent: parent,
@@ -136,6 +162,7 @@ func (o *GoogleCAS) Sign(ctx context.Context, cr signer.CertificateRequestObject
 				Nanos:   0,
 			},
 			CertificateTemplate: issuerSpec.CertificateTemplate,
+			Labels:              certLabels,
 		},
 		RequestId:                     uuid.New().String(),
 		IssuingCertificateAuthorityId: issuerSpec.CertificateAuthorityId,
@@ -297,4 +324,121 @@ func filterAndDeduplicateCAs(caChains []*casapi.FetchCaCertsResponse_CertChain) 
 		}
 	}
 	return caBuf.Bytes(), nil
+}
+
+// sanitizeGCPLabelKey normalizes a string to be a valid GCP label key.
+// GCP label keys must be 1-63 characters, containing only lowercase letters,
+// digits, underscores, and hyphens, and must start with a lowercase letter.
+func sanitizeGCPLabelKey(key string) string {
+	key = strings.ToLower(key)
+	key = gcpLabelKeyRegexp.ReplaceAllString(key, "_")
+
+	// Trim leading non-letter characters
+	for len(key) > 0 && (key[0] < 'a' || key[0] > 'z') {
+		key = key[1:]
+	}
+
+	if len(key) > maxGCPLabelKeyLen {
+		key = key[:maxGCPLabelKeyLen]
+	}
+	return key
+}
+
+// sanitizeGCPLabelValue normalizes a string to be a valid GCP label value.
+// GCP label values must be 0-63 characters, containing only lowercase letters,
+// digits, underscores, and hyphens.
+func sanitizeGCPLabelValue(value string) string {
+	value = strings.ToLower(value)
+	value = gcpLabelKeyRegexp.ReplaceAllString(value, "_")
+
+	if len(value) > maxGCPLabelValueLen {
+		value = value[:maxGCPLabelValueLen]
+	}
+	return value
+}
+
+// buildCertificateLabels constructs the labels map for a Google CAS Certificate
+// by merging three sources (in priority order, later overrides earlier):
+//  1. Static labels from the issuer spec (issuerSpec.CertificateLabels)
+//  2. Auto-injected operational metadata (CR name, namespace, issuer info)
+//  3. User-defined labels from the parent Certificate annotations with the
+//     prefix "cas.issuer.jetstack.io/certificate-label-"
+//
+// All keys and values are sanitized to conform to GCP label constraints.
+// The total number of labels is capped at 64 (GCP maximum).
+func buildCertificateLabels(
+	ctx context.Context,
+	kubeClient client.Client,
+	cr signer.CertificateRequestObject,
+	issuerName string,
+	issuerKind string,
+	issuerSpec *issuersv1beta1.GoogleCASIssuerSpec,
+) map[string]string {
+	labels := make(map[string]string)
+
+	// Source 1: Static labels from issuer spec
+	for k, v := range issuerSpec.CertificateLabels {
+		sanitizedKey := sanitizeGCPLabelKey(k)
+		if sanitizedKey != "" {
+			labels[sanitizedKey] = sanitizeGCPLabelValue(v)
+		}
+	}
+
+	// Source 2: Auto-injected operational metadata
+	if name := cr.GetName(); name != "" {
+		labels["cert-manager-io_certificate-request-name"] = sanitizeGCPLabelValue(name)
+	}
+	if ns := cr.GetNamespace(); ns != "" {
+		labels["cert-manager-io_certificate-request-namespace"] = sanitizeGCPLabelValue(ns)
+	}
+	if issuerName != "" {
+		labels["cert-manager-io_issuer-name"] = sanitizeGCPLabelValue(issuerName)
+	}
+	if issuerKind != "" {
+		labels["cert-manager-io_issuer-kind"] = sanitizeGCPLabelValue(issuerKind)
+	}
+
+	// Source 3: User-defined labels from parent Certificate annotations
+	crAnnotations := cr.GetAnnotations()
+	if crAnnotations != nil {
+		if parentCertName, exists := crAnnotations[certManagerCertificateNameKey]; exists && parentCertName != "" {
+			// Fetch the parent Certificate to extract custom labels
+			var parentCert cmapi.Certificate
+			err := kubeClient.Get(ctx, types.NamespacedName{
+				Namespace: cr.GetNamespace(),
+				Name:      parentCertName,
+			}, &parentCert)
+
+			if err == nil {
+				// Note: if there's an error fetching the certificate for any reason
+e issuance.				// (e.g. CSR generated not by a Certificate, RBAC issues, etc),
+				// we just skip the parent annotations rather than failing th
+				for k, v := range parentCert.GetAnnotations() {
+					if strings.HasPrefix(k, certificateLabelAnnotationPrefix) {
+						labelKey := strings.TrimPrefix(k, certificateLabelAnnotationPrefix)
+						sanitizedKey := sanitizeGCPLabelKey(labelKey)
+						if sanitizedKey != "" {
+							labels[sanitizedKey] = sanitizeGCPLabelValue(v)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Enforce GCP maximum label count
+	if len(labels) > maxGCPLabels {
+		truncated := make(map[string]string, maxGCPLabels)
+		count := 0
+		for k, v := range labels {
+			if count >= maxGCPLabels {
+				break
+			}
+			truncated[k] = v
+			count++
+		}
+		return truncated
+	}
+
+	return labels
 }
