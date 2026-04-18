@@ -411,8 +411,8 @@ func buildCertificateLabels(
 
 			if err == nil {
 				// Note: if there's an error fetching the certificate for any reason
-e issuance.				// (e.g. CSR generated not by a Certificate, RBAC issues, etc),
-				// we just skip the parent annotations rather than failing th
+				// (e.g. CSR generated not by a Certificate, RBAC issues, etc),
+				// we just skip the parent annotations rather than failing the issuance.
 				for k, v := range parentCert.GetAnnotations() {
 					if strings.HasPrefix(k, certificateLabelAnnotationPrefix) {
 						labelKey := strings.TrimPrefix(k, certificateLabelAnnotationPrefix)
