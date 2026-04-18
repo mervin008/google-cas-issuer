@@ -24,7 +24,9 @@ jobs:
         # Adding `fetch-depth: 0` makes sure tags are also fetched. We need
         # the tags so `git describe` returns a valid version.
         # see https://github.com/actions/checkout/issues/701 for extra info about this option
-        with: { fetch-depth: 0 }
+        with: 
+          fetch-depth: 0
+          fetch-tags: true
 
       - id: go-version
         run: |
