@@ -418,8 +418,13 @@ func buildCertificateLabels(
 						labelKey := strings.TrimPrefix(k, certificateLabelAnnotationPrefix)
 						sanitizedKey := sanitizeGCPLabelKey(labelKey)
 						if sanitizedKey != "" {
+							if strings.HasPrefix(sanitizedKey, "cert-manager-io_") {
+								continue
+							}
 							labels[sanitizedKey] = sanitizeGCPLabelValue(v)
 						}
+					}
+				}
 					}
 				}
 			}
