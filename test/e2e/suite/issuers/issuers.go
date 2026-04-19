@@ -30,9 +30,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 
-	"github.com/cert-manager/google-cas-issuer/test/e2e/framework"
-	"github.com/cert-manager/google-cas-issuer/test/e2e/framework/config"
-	"github.com/cert-manager/google-cas-issuer/test/e2e/util"
+	"github.com/mervin008/google-cas-issuer/test/e2e/framework"
+	"github.com/mervin008/google-cas-issuer/test/e2e/framework/config"
+	"github.com/mervin008/google-cas-issuer/test/e2e/util"
 
 	_ "embed"
 

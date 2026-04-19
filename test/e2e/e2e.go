@@ -28,8 +28,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
-	"github.com/cert-manager/google-cas-issuer/test/e2e/framework/config"
-	"github.com/cert-manager/google-cas-issuer/test/e2e/util"
+	"github.com/mervin008/google-cas-issuer/test/e2e/framework/config"
+	"github.com/mervin008/google-cas-issuer/test/e2e/util"
 
 	. "github.com/onsi/ginkgo/v2"
 )

@@ -25,8 +25,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/restmapper"
 
-	"github.com/cert-manager/google-cas-issuer/test/e2e/framework/config"
-	"github.com/cert-manager/google-cas-issuer/test/e2e/framework/helper"
+	"github.com/mervin008/google-cas-issuer/test/e2e/framework/config"
+	"github.com/mervin008/google-cas-issuer/test/e2e/framework/helper"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

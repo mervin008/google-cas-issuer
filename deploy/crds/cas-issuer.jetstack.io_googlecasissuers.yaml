@@ -69,6 +69,17 @@ spec:
                   use to sign. Omit in order to load balance across all CAs
                   in the pool
                 type: string
+              certificateLabels:
+                additionalProperties:
+                  type: string
+                description: |-
+                  CertificateLabels are key-value pairs that will be applied as labels
+                  to every certificate issued by this issuer in Google Certificate Authority Service.
+                  These labels are visible in the GCP Console and can be used for filtering,
+                  cost attribution, and organizational visibility.
+                  Label keys and values must conform to GCP label constraints:
+                  keys and values must be 1-63 characters, lowercase letters, digits, underscores, and hyphens.
+                type: object
               certificateTemplate:
                 description: |-
                   CertificateTemplate is specific certificate template to

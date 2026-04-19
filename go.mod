@@ -1,4 +1,4 @@
-module github.com/cert-manager/google-cas-issuer
+module github.com/mervin008/google-cas-issuer
 
 go 1.25.0
 

@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	issuersv1beta1 "github.com/cert-manager/google-cas-issuer/api/v1beta1"
-	controllers "github.com/cert-manager/google-cas-issuer/pkg/controllers"
+	issuersv1beta1 "github.com/mervin008/google-cas-issuer/api/v1beta1"
+	controllers "github.com/mervin008/google-cas-issuer/pkg/controllers"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 )

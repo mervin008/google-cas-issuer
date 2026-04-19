@@ -44,7 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
-	issuersv1beta1 "github.com/cert-manager/google-cas-issuer/api/v1beta1"
+	issuersv1beta1 "github.com/mervin008/google-cas-issuer/api/v1beta1"
 )
 
 var PickedupRequestConditionType = cmapi.CertificateRequestConditionType("pickedup")

@@ -49,11 +49,11 @@ helm upgrade -i cert-manager-google-cas-issuer oci://quay.io/jetstack/charts/cer
 
 Or alternatively, assuming that you have installed cert-manager in the `cert-manager` namespace, you can use a single kubectl
 command to install Google CAS Issuer.
-Visit the [GitHub releases](https://github.com/cert-manager/google-cas-issuer/releases), select the latest release
+Visit the [GitHub releases](https://github.com/mervin008/google-cas-issuer/releases), select the latest release
 and copy the command, e.g.
 
 ```shell
-kubectl apply -f https://github.com/cert-manager/google-cas-issuer/releases/download/v0.6.1/google-cas-issuer-v0.6.1.yaml
+kubectl apply -f https://github.com/mervin008/google-cas-issuer/releases/download/v0.6.1/google-cas-issuer-v0.6.1.yaml
 ```
 
 You can then skip to the [Setting up Google Cloud IAM](#setting-up-google-cloud-iam) section.

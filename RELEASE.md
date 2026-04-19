@@ -36,5 +36,5 @@ This repo will produce the following artifacts each release. For documentation o
     - The chart is also published to the legacy HTTP Helm repository at `https://charts.jetstack.io` (maintained by Venafi).
       Publishing to the legacy repo depends on a PR to be merged in a closed Venafi repo, and might be delayed.
 
-[release workflow]: https://github.com/cert-manager/google-cas-issuer/actions/workflows/release.yaml
-[releases page]: https://github.com/cert-manager/google-cas-issuer/releases
+[release workflow]: https://github.com/mervin008/google-cas-issuer/actions/workflows/release.yaml
+[releases page]: https://github.com/mervin008/google-cas-issuer/releases
