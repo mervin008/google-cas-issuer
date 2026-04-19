@@ -17,7 +17,7 @@ limitations under the License.
 package main
 
 import (
-	"github.com/cert-manager/google-cas-issuer/cmd"
+	"github.com/mervin008/google-cas-issuer/cmd"
 )
 
 func main() {
