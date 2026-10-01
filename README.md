@@ -145,6 +145,21 @@ gcloud privateca pools add-iam-policy-binding my-pool --role=roles/privateca.poo
 ```
 
 
+### Multi-tenancy and security considerations
+
+> [!IMPORTANT]
+> The CAS Issuer authenticates to Google Cloud as a **single identity**. When a `GoogleCASIssuer` or `GoogleCASClusterIssuer` omits `spec.credentials`, it falls back to the controller's ambient credentials (Application Default Credentials / GKE Workload Identity) — the controller pod's own service account, which is shared across every issuer and namespace in the cluster.
+
+The `spec.project`, `spec.location`, and `spec.caPoolId` fields are author-supplied and are not restricted to an allow-list. An issuer that uses the ambient credentials can therefore target **any CA pool that the controller's service account can reach**. The effective security boundary is the IAM scope you grant that service account, not the issuer object itself.
+
+In a shared cluster this has a consequence worth noting: if the controller's service account is granted access to multiple teams' CA pools, then anyone who can create (or reference) a `GoogleCASIssuer` and a `CertificateRequest` can obtain certificates signed by any of those pools — including a pool they were never intended to use. cert-manager's approval step gates *whether* a request is signed, not *which* identity signs it, so it does not change this boundary.
+
+To keep tenants isolated:
+
+- **Scope the controller's IAM to only the pools you intend to expose.** Bind `roles/privateca.certificateRequester` per pool (as shown above), not at project or folder scope. Broader grants widen the blast radius to every pool in that scope.
+- **Restrict who can create issuer and certificate objects.** Use Kubernetes RBAC to limit `create` on `googlecasissuers.cas-issuer.jetstack.io` and `certificaterequests.cert-manager.io` in tenant namespaces.
+- **Prefer explicit per-tenant credentials when tenants must target distinct pools.** Give each tenant a `spec.credentials` Secret referencing a service account scoped to only their pool, rather than relying on the shared ambient identity.
+
 #### Inside GKE with workload identity
 
 [Workload identity](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) lets you bind a
@@ -300,6 +315,86 @@ certificate.cert-manager.io/demo-certificate   True    demo-cert-tls  1m
 NAME                                     TYPE                                  DATA   AGE
 secret/demo-cert-tls                     kubernetes.io/tls                     3      1m
 ```
+
+### Metadata Propagation (Label Sync)
+
+The Google CAS Issuer can synchronize Kubernetes metadata to the issued certificates in Google Cloud CAS using **Labels**. This lets a central team see, from within Google Cloud, which Kubernetes resource each certificate was issued for.
+
+Metadata propagation is **opt-in** and disabled by default: unless you enable it, no Kubernetes metadata is sent to Google Cloud. Enable it per issuer with the `certificateMetadataPropagationMode` field of a `GoogleCASIssuer` or `GoogleCASClusterIssuer`:
+
+| Mode | Labels set on the Google CAS certificate |
+| :--- | :--- |
+| `None` (default) | No labels. |
+| `Provenance` | The provenance labels described below. |
+| `Labels` | The provenance labels, and the labels of the `Certificate`. |
+
+```yaml
+apiVersion: cas-issuer.jetstack.io/v1beta1
+kind: GoogleCASClusterIssuer
+metadata:
+  name: googlecasclusterissuer-sample
+spec:
+  project: $PROJECT_ID
+  location: us-east1
+  caPoolId: my-pool
+  certificateMetadataPropagationMode: Labels
+```
+
+#### Operational Provenance Labels
+
+In the `Provenance` and `Labels` modes, the issuer injects the following provenance metadata into every issued certificate:
+
+- `cert-manager-io_certificate-name`: The name of the parent `Certificate` resource. Not set if the request was not created for a `Certificate`.
+- `cert-manager-io_certificate-request-name`: The name of the `CertificateRequest` resource.
+- `cert-manager-io_certificate-request-namespace`: The namespace where the request originated. Not set for Kubernetes `CertificateSigningRequest` resources, which have no namespace.
+
+#### Synchronization of Labels
+
+In the `Labels` mode, all labels defined in the `metadata.labels` section of a `Certificate` (or `CertificateRequest`) are also propagated to the Google CAS certificate. This includes the labels added by deployment tools such as Helm or Argo CD.
+
+- **Sanitization**: Kubernetes labels are automatically sanitized to meet GCP's strict requirements (lowercase, alphanumeric, dashes, or underscores; max 63 characters).
+- **Key Mapping**: If a label key starts with a non-alphabetic character (like a number), it is automatically prefixed with `l-` to comply with GCP API constraints.
+- **Conflicts**: A Kubernetes label never replaces a provenance label. If two label keys are identical after sanitization, the first one in alphabetical order is kept.
+- **Limit**: At most 60 labels are set on a certificate. The provenance labels are set first, then the Kubernetes labels in alphabetical order of their keys until the limit is reached.
+
+#### Example
+
+With the issuer above, the following `Certificate`:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: my-app-cert
+  namespace: production
+  labels:
+    # These will appear in the Google Cloud CAS Console
+    team: "platform-identity"
+    cost-center: "442"
+spec:
+  secretName: my-app-cert-tls
+  dnsNames:
+    - my-app.example.com
+  issuerRef:
+    group: cas-issuer.jetstack.io
+    kind: GoogleCASClusterIssuer
+    name: googlecasclusterissuer-sample
+```
+
+is issued in Google CAS with these labels:
+
+| Label key | Label value |
+| :--- | :--- |
+| `team` | `platform-identity` |
+| `cost-center` | `442` |
+| `cert-manager-io_certificate-name` | `my-app-cert` |
+| `cert-manager-io_certificate-request-name` | `my-app-cert-1` |
+| `cert-manager-io_certificate-request-namespace` | `production` |
+
+#### Limitations
+
+- Labels are set once, when the certificate is issued. Changing the labels of a `Certificate` does not update the certificates that were already issued in Google CAS; the new labels are used from the next issuance, for example at renewal.
+- Sanitization can alter values. For example, a `Certificate` named `my.app.example.com` is labelled `my_app_example_com`, and values longer than 63 characters are truncated.
 
 ## Continuous Integration
 
