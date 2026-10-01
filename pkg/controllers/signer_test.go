@@ -17,6 +17,7 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -34,7 +35,13 @@ import (
 	"github.com/cert-manager/issuer-lib/controllers/signer"
 	"github.com/stretchr/testify/assert"
 	certificatesv1 "k8s.io/api/certificates/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/cert-manager/google-cas-issuer/api/v1beta1"
 )
@@ -326,7 +333,32 @@ func TestSanitizeGCPLabel(t *testing.T) {
 }
 
 func TestBuildCertificateLabels(t *testing.T) {
-	googleCAS := &GoogleCAS{}
+	scheme := runtime.NewScheme()
+	if err := cmapi.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	// The Certificate that labelledRequest was created for.
+	parentCertificate := &cmapi.Certificate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "parent-cert",
+			Namespace: "default",
+		},
+		Spec: cmapi.CertificateSpec{
+			SecretName: "parent-cert-tls",
+		},
+	}
+
+	// The same Certificate, with a Secret name that is not a valid GCP label value as is.
+	parentCertificateWithDottedSecret := &cmapi.Certificate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "parent-cert",
+			Namespace: "default",
+		},
+		Spec: cmapi.CertificateSpec{
+			SecretName: "parent-cert.example.com-tls",
+		},
+	}
 
 	// A CertificateRequest as cert-manager creates it for a Certificate: the labels of
 	// the Certificate are copied and the name of the Certificate is set as an annotation.
@@ -376,7 +408,9 @@ func TestBuildCertificateLabels(t *testing.T) {
 		name string
 		cr   signer.CertificateRequestObject
 		mode v1beta1.CertificateMetadataPropagationMode
-		want map[string]string
+		// certificates are the Certificates that exist in the cluster.
+		certificates []client.Object
+		want         map[string]string
 	}{
 		{
 			name: "nothing is propagated when the mode is not set",
@@ -404,6 +438,30 @@ func TestBuildCertificateLabels(t *testing.T) {
 				"cert-manager-io_certificate-name":              "parent-cert",
 				"cert-manager-io_certificate-request-name":      "test-request",
 				"cert-manager-io_certificate-request-namespace": "default",
+			},
+		},
+		{
+			name:         "the Secret name of the parent Certificate is propagated",
+			cr:           labelledRequest,
+			mode:         v1beta1.CertificateMetadataPropagationModeProvenance,
+			certificates: []client.Object{parentCertificate},
+			want: map[string]string{
+				"cert-manager-io_certificate-name":              "parent-cert",
+				"cert-manager-io_certificate-request-name":      "test-request",
+				"cert-manager-io_certificate-request-namespace": "default",
+				"cert-manager-io_secret-name":                   "parent-cert-tls",
+			},
+		},
+		{
+			name:         "the Secret name is sanitized",
+			cr:           labelledRequest,
+			mode:         v1beta1.CertificateMetadataPropagationModeProvenance,
+			certificates: []client.Object{parentCertificateWithDottedSecret},
+			want: map[string]string{
+				"cert-manager-io_certificate-name":              "parent-cert",
+				"cert-manager-io_certificate-request-name":      "test-request",
+				"cert-manager-io_certificate-request-namespace": "default",
+				"cert-manager-io_secret-name":                   "parent-cert_example_com-tls",
 			},
 		},
 		{
@@ -449,10 +507,83 @@ func TestBuildCertificateLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := googleCAS.buildCertificateLabels(tt.cr, tt.mode)
+			googleCAS := &GoogleCAS{
+				reader: fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.certificates...).Build(),
+			}
+
+			got := googleCAS.buildCertificateLabels(t.Context(), tt.cr, tt.mode)
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestBuildCertificateLabelsCertificateLookup(t *testing.T) {
+	requestForCertificate := signer.CertificateRequestObjectFromCertificateRequest(&cmapi.CertificateRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-request",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"cert-manager.io/certificate-name": "parent-cert",
+			},
+		},
+	})
+
+	requestWithoutCertificate := signer.CertificateRequestObjectFromCertificateRequest(&cmapi.CertificateRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-request",
+			Namespace: "default",
+		},
+	})
+
+	// readerThatFails returns a reader whose every read of a single object fails with the error returned by fail.
+	readerThatFails := func(fail func(key client.ObjectKey) error) client.Reader {
+		return fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(_ context.Context, _ client.WithWatch, key client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+				return fail(key)
+			},
+		}).Build()
+	}
+
+	t.Run("the other labels are still set when the Certificate may not be read", func(t *testing.T) {
+		googleCAS := &GoogleCAS{
+			reader: readerThatFails(func(key client.ObjectKey) error {
+				return apierrors.NewForbidden(schema.GroupResource{Group: "cert-manager.io", Resource: "certificates"}, key.Name, errors.New("access denied"))
+			}),
+		}
+
+		got := googleCAS.buildCertificateLabels(t.Context(), requestForCertificate, v1beta1.CertificateMetadataPropagationModeProvenance)
+		assert.Equal(t, map[string]string{
+			"cert-manager-io_certificate-name":              "parent-cert",
+			"cert-manager-io_certificate-request-name":      "test-request",
+			"cert-manager-io_certificate-request-namespace": "default",
+		}, got)
+	})
+
+	unexpectedRead := func(t *testing.T) client.Reader {
+		return readerThatFails(func(key client.ObjectKey) error {
+			t.Errorf("unexpected read of %s from the API server", key)
+			return errors.New("unexpected read")
+		})
+	}
+
+	for _, mode := range []v1beta1.CertificateMetadataPropagationMode{"", v1beta1.CertificateMetadataPropagationModeNone} {
+		t.Run(fmt.Sprintf("the Certificate is not read when the mode is %q", mode), func(t *testing.T) {
+			googleCAS := &GoogleCAS{reader: unexpectedRead(t)}
+
+			got := googleCAS.buildCertificateLabels(t.Context(), requestForCertificate, mode)
+			assert.Nil(t, got)
+		})
+	}
+
+	t.Run("nothing is read for a request that was not created for a Certificate", func(t *testing.T) {
+		googleCAS := &GoogleCAS{reader: unexpectedRead(t)}
+
+		got := googleCAS.buildCertificateLabels(t.Context(), requestWithoutCertificate, v1beta1.CertificateMetadataPropagationModeProvenance)
+		assert.Equal(t, map[string]string{
+			"cert-manager-io_certificate-request-name":      "test-request",
+			"cert-manager-io_certificate-request-namespace": "default",
+		}, got)
+	})
 }
 
 func TestBuildCertificateLabelsLimit(t *testing.T) {
@@ -471,7 +602,7 @@ func TestBuildCertificateLabelsLimit(t *testing.T) {
 		},
 	})
 
-	got := googleCAS.buildCertificateLabels(cr, v1beta1.CertificateMetadataPropagationModeLabels)
+	got := googleCAS.buildCertificateLabels(t.Context(), cr, v1beta1.CertificateMetadataPropagationModeLabels)
 	assert.Len(t, got, 60)
 
 	// Provenance labels are added first, so they are never the ones that are dropped.

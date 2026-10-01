@@ -58,7 +58,7 @@ type GoogleCASIssuerSpec struct {
 	// CertificateMetadataPropagationMode controls which Kubernetes metadata of a certificate request is propagated to Google Cloud, as labels on the Certificate Authority Service certificate.
 	// Possible values: "None" (default), "Provenance", "Labels".
 	// "None": no labels are set on the Certificate Authority Service certificate.
-	// "Provenance": the labels identify where the certificate came from: the name of the cert-manager Certificate, and the name and namespace of the certificate request.
+	// "Provenance": the labels identify where the certificate came from: the name of the cert-manager Certificate and of its Secret, and the name and namespace of the certificate request.
 	// "Labels": the "Provenance" labels are set, and the Kubernetes labels of the certificate request are propagated as well. cert-manager copies all labels of a Certificate to its certificate requests.
 	// +optional
 	CertificateMetadataPropagationMode CertificateMetadataPropagationMode `json:"certificateMetadataPropagationMode,omitempty"`

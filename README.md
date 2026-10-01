@@ -345,6 +345,7 @@ spec:
 In the `Provenance` and `Labels` modes, the issuer injects the following provenance metadata into every issued certificate:
 
 - `cert-manager-io_certificate-name`: The name of the parent `Certificate` resource. Not set if the request was not created for a `Certificate`.
+- `cert-manager-io_secret-name`: The name of the `Secret` in which the parent `Certificate` stores the issued certificate. To set this label the issuer reads the `Certificate`, which requires the permission to `get` `certificates.cert-manager.io`; the Helm chart grants it. The label is not set if the `Certificate` cannot be read.
 - `cert-manager-io_certificate-request-name`: The name of the `CertificateRequest` resource.
 - `cert-manager-io_certificate-request-namespace`: The namespace where the request originated. Not set for Kubernetes `CertificateSigningRequest` resources, which have no namespace.
 
@@ -388,6 +389,7 @@ is issued in Google CAS with these labels:
 | `team` | `platform-identity` |
 | `cost-center` | `442` |
 | `cert-manager-io_certificate-name` | `my-app-cert` |
+| `cert-manager-io_secret-name` | `my-app-cert-tls` |
 | `cert-manager-io_certificate-request-name` | `my-app-cert-1` |
 | `cert-manager-io_certificate-request-namespace` | `production` |
 

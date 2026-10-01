@@ -64,6 +64,12 @@ rules:
   - certificaterequests/status
   verbs:
   - patch
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  verbs:
+  - get
 
 - apiGroups:
   - certificates.k8s.io
